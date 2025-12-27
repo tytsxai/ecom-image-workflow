@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
+import traceback
 from pathlib import Path
 
 from .generator import generate_product_package
@@ -13,7 +15,16 @@ from .validator import validate_product_package
 def _cmd_generate(args: argparse.Namespace) -> int:
     products = read_products_csv(args.input)
     out_root = Path(args.out)
+
+    if out_root.exists() and not out_root.is_dir():
+        raise ValidationError(f"Output root must be a directory: {out_root}")
     out_root.mkdir(parents=True, exist_ok=True)
+
+    seen_product_ids: set[str] = set()
+    for p in products:
+        if p.product_id in seen_product_ids:
+            raise ValidationError(f"Duplicate product_id in CSV: '{p.product_id}'")
+        seen_product_ids.add(p.product_id)
 
     created: list[Path] = []
     for p in products:
@@ -27,9 +38,17 @@ def _cmd_validate(args: argparse.Namespace) -> int:
     out_root = Path(args.out)
     if not out_root.exists():
         raise ValidationError(f"Output root not found: {out_root}")
+    if not out_root.is_dir():
+        raise ValidationError(f"Output root must be a directory: {out_root}")
 
     if args.product_id:
-        product_dir = out_root / safe_id(args.product_id)
+        raw = args.product_id.strip()
+        sid = safe_id(raw)
+        if not sid or sid != raw:
+            raise ValidationError(
+                "product_id contains unsafe characters; allowed: letters, numbers, '-' and '_'"
+            )
+        product_dir = out_root / sid
         validate_product_package(product_dir, require_images=args.require_images)
         print(f"OK: {product_dir}")
         return 0
@@ -81,6 +100,15 @@ def main(argv: list[str] | None = None) -> int:
     except ValidationError as e:
         print(f"ERROR: {e}", file=sys.stderr)
         return 2
+    except KeyboardInterrupt:
+        print("ERROR: interrupted", file=sys.stderr)
+        return 130
+    except Exception as e:
+        if os.environ.get("MVP_IMAGE_WORKFLOW_DEBUG") == "1":
+            traceback.print_exc()
+        else:
+            print(f"FATAL: {type(e).__name__}: {e}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

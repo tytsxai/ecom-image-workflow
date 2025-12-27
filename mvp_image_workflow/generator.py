@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 from pathlib import Path
 
 from .batch import ProductRow
@@ -28,12 +30,48 @@ QC_REJECT_TAGS = [
 
 def _write_text(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content.rstrip() + "\n", encoding="utf-8")
+
+    tmp_path: str | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            "w",
+            encoding="utf-8",
+            newline="\n",
+            dir=path.parent,
+            delete=False,
+        ) as f:
+            tmp_path = f.name
+            f.write(content.rstrip() + "\n")
+        os.replace(tmp_path, path)
+    finally:
+        if tmp_path is not None and os.path.exists(tmp_path):
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
 
 
 def _write_json(path: Path, obj: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(obj, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    tmp_path: str | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            "w",
+            encoding="utf-8",
+            newline="\n",
+            dir=path.parent,
+            delete=False,
+        ) as f:
+            tmp_path = f.name
+            f.write(json.dumps(obj, ensure_ascii=False, indent=2) + "\n")
+        os.replace(tmp_path, path)
+    finally:
+        if tmp_path is not None and os.path.exists(tmp_path):
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
 
 
 def _dimensions_line(product: ProductRow) -> str | None:
@@ -42,15 +80,65 @@ def _dimensions_line(product: ProductRow) -> str | None:
     return f"Dimensions: {product.dimensions_l} x {product.dimensions_w} x {product.dimensions_h} {product.units}"
 
 
+def _validate_batch_id(batch_id: str | None) -> str | None:
+    if batch_id is None:
+        return None
+    raw = batch_id.strip().replace(" ", "_")
+    safe = safe_id(batch_id)
+    if not safe:
+        raise ValidationError("batch_id cannot be empty after normalization")
+    if safe != raw:
+        raise ValidationError(
+            "batch_id contains unsafe characters; allowed: letters, numbers, '-' and '_'"
+        )
+    return safe
+
+
+def _read_existing_manifest_product_id(product_dir: Path) -> str | None:
+    manifest_path = product_dir / "manifest.json"
+    if not manifest_path.exists():
+        return None
+    try:
+        data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as e:
+        raise ValidationError(f"Invalid JSON in existing {manifest_path}: {e}") from None
+
+    if not isinstance(data, dict):
+        raise ValidationError(f"Invalid existing {manifest_path}: expected JSON object")
+    product = data.get("product")
+    if not isinstance(product, dict):
+        raise ValidationError(f"Invalid existing {manifest_path}: missing 'product' object")
+    pid = product.get("product_id")
+    if pid is None:
+        return None
+    if not isinstance(pid, str):
+        raise ValidationError(f"Invalid existing {manifest_path}: product.product_id must be a string")
+    return pid
+
+
 def generate_product_package(product: ProductRow, out_root: str | Path, batch_id: str | None) -> Path:
     root = Path(out_root)
+    if root.exists() and not root.is_dir():
+        raise ValidationError(f"Output root must be a directory: {root}")
     safe_product_id = safe_id(product.product_id)
     if not safe_product_id:
         raise ValidationError(
             f"product_id '{product.product_id}' cannot be converted to a safe folder name."
         )
+    if safe_product_id != product.product_id:
+        raise ValidationError(
+            "product_id contains unsafe characters; allowed: letters, numbers, '-' and '_'"
+        )
+
+    safe_batch_id = _validate_batch_id(batch_id)
 
     product_dir = root / safe_product_id
+    existing_pid = _read_existing_manifest_product_id(product_dir)
+    if existing_pid is not None and existing_pid != product.product_id:
+        raise ValidationError(
+            "product_id collision after normalization: "
+            f"existing '{existing_pid}' vs new '{product.product_id}' map to '{safe_product_id}'"
+        )
     showcase_dir = product_dir / "showcase"
     spec_dir = product_dir / "spec"
     howto_dir = product_dir / "howto"
@@ -63,7 +151,7 @@ def generate_product_package(product: ProductRow, out_root: str | Path, batch_id
         d.mkdir(parents=True, exist_ok=True)
 
     prefix = safe_product_id
-    suffix = f"_{batch_id}" if batch_id else ""
+    suffix = f"_{safe_batch_id}" if safe_batch_id else ""
 
     expected = {
         "showcase": [
@@ -101,7 +189,7 @@ def generate_product_package(product: ProductRow, out_root: str | Path, batch_id
     if product.tips:
         howto_02_lines.extend(f"- {t}" for t in product.tips)
     else:
-        howto_02_lines.append("- (Optional) Add 2–4 short English tips.")
+        howto_02_lines.append("- (Optional) Add 2-4 short English tips.")
     _write_text(texts_dir / "howto_02.txt", "\n".join(howto_02_lines))
 
     if product.personalization_text_en:
@@ -197,7 +285,7 @@ def generate_product_package(product: ProductRow, out_root: str | Path, batch_id
     manifest = {
         "version": "0.1.0",
         "generated_at_utc": now_utc_iso(),
-        "batch_id": batch_id,
+        "batch_id": safe_batch_id,
         "product": {
             "product_id": product.product_id,
             "safe_product_id": safe_product_id,
