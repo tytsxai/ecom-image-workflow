@@ -41,6 +41,10 @@ def require_english_text(field_name: str, value: str) -> str:
         raise ValidationError(
             f"Field '{field_name}' contains non-English characters (Cyrillic/CJK detected)."
         )
+    if not v.isascii():
+        raise ValidationError(
+            f"Field '{field_name}' must be ASCII English text (no non-ASCII characters)."
+        )
     for ch in v:
         if ch in "\n\t":
             continue

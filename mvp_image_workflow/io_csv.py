@@ -4,7 +4,7 @@ import csv
 from pathlib import Path
 
 from .batch import DEFAULT_OUTPUT_SET, DEFAULT_STYLE_PACK, ProductRow
-from .util import ValidationError, optional_text, require_english_text
+from .util import ValidationError, optional_text, require_english_text, safe_id
 
 
 def _pick_list(prefix: str, row: dict[str, str], max_items: int) -> list[str]:
@@ -32,6 +32,11 @@ def read_products_csv(path: str | Path) -> list[ProductRow]:
                 product_id = (row.get("product_id") or "").strip()
                 if not product_id:
                     raise ValidationError("Missing required field: product_id")
+                sid = safe_id(product_id)
+                if sid != product_id:
+                    raise ValidationError(
+                        "product_id contains unsafe characters; allowed: letters, numbers, '-' and '_'"
+                    )
 
                 product_name_en = require_english_text("product_name_en", row.get("product_name_en", ""))
 

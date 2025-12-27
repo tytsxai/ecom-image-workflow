@@ -8,11 +8,25 @@ from .util import ValidationError
 
 def _read_json(path: Path) -> dict:
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
         raise ValidationError(f"Missing required file: {path}") from None
     except json.JSONDecodeError as e:
         raise ValidationError(f"Invalid JSON in {path}: {e}") from None
+
+    if not isinstance(data, dict):
+        raise ValidationError(f"Invalid JSON in {path}: expected an object")
+    return data
+
+
+def _validate_expected_filename(fname: str) -> None:
+    if "/" in fname or "\\" in fname:
+        raise ValidationError(f"Invalid expected filename (must not contain path separators): {fname}")
+    p = Path(fname)
+    if p.is_absolute() or p.name != fname:
+        raise ValidationError(f"Invalid expected filename (must be a basename): {fname}")
+    if fname in {"", ".", ".."}:
+        raise ValidationError(f"Invalid expected filename: {fname}")
 
 
 def validate_product_package(product_dir: str | Path, require_images: bool) -> None:
@@ -41,7 +55,7 @@ def validate_product_package(product_dir: str | Path, require_images: bool) -> N
         meta_dir / "product.json",
     ]
 
-    missing = [str(p) for p in required_files if not p.exists()]
+    missing = [str(p) for p in required_files if not p.is_file()]
     if missing:
         raise ValidationError("Missing required files:\n- " + "\n- ".join(missing))
 
@@ -58,8 +72,11 @@ def validate_product_package(product_dir: str | Path, require_images: bool) -> N
             raise ValidationError(f"manifest.json expected_outputs.{category} must be a list")
 
         category_dir = root / category
+        if not category_dir.is_dir():
+            raise ValidationError(f"Missing expected category folder: {category_dir}")
         for fname in files:
             if not isinstance(fname, str):
                 raise ValidationError(f"manifest.json expected_outputs.{category} contains non-string")
+            _validate_expected_filename(fname)
             if not (category_dir / fname).exists():
                 raise ValidationError(f"Missing expected image: {category_dir / fname}")
