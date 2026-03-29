@@ -59,6 +59,27 @@ def validate_product_package(product_dir: str | Path, require_images: bool) -> N
     if missing:
         raise ValidationError("Missing required files:\n- " + "\n- ".join(missing))
 
+    paths_config = manifest.get("paths")
+    if not isinstance(paths_config, dict):
+        raise ValidationError("manifest.json missing 'paths' dict")
+
+    expected_layout = {
+        "prompts_dir": prompts_dir,
+        "texts_dir": texts_dir,
+        "meta_dir": meta_dir,
+    }
+    for key, expected_dir in expected_layout.items():
+        rel_value = paths_config.get(key)
+        if not isinstance(rel_value, str):
+            raise ValidationError(f"manifest.paths.{key} must be a string")
+        manifest_dir = root / rel_value
+        if not manifest_dir.is_dir():
+            raise ValidationError(f"manifest.paths.{key} points to missing directory: {manifest_dir}")
+        if manifest_dir.resolve() != expected_dir.resolve():
+            raise ValidationError(
+                f"manifest.paths.{key} ({rel_value}) does not match the actual layout ({expected_dir.relative_to(root)})"
+            )
+
     if not require_images:
         return
 
