@@ -170,6 +170,162 @@ class TestMvpImageWorkflow(unittest.TestCase):
             with self.assertRaises(ValidationError):
                 validate_product_package(product_dir, require_images=True)
 
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["expected_outputs"]["showcase"][0] = "evil.txt"
+            manifest_path.write_text(
+                json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            with self.assertRaises(ValidationError):
+                validate_product_package(product_dir, require_images=True)
+
+    def test_validator_rejects_directory_instead_of_expected_image(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            product = ProductRow(
+                product_id="SKU123",
+                product_name_en="Stainless Steel Insulated Tumbler",
+                style_pack="minimal_white",
+                output_set="minimum",
+                units="cm",
+                dimensions_l=None,
+                dimensions_w=None,
+                dimensions_h=None,
+                specs=("Capacity: 500 ml", "Double-wall insulation", "Leak-proof lid"),
+                howto_title="How to Use",
+                steps=("Fill with your drink", "Close the lid firmly", "Enjoy hot or cold beverages"),
+                tips=(),
+                manager_notes=None,
+                must_have_keywords=None,
+                must_avoid_elements=None,
+                personalization_text_en=None,
+            )
+            product_dir = generate_product_package(product, root / "out", batch_id=None)
+
+            import json
+
+            manifest = json.loads((product_dir / "manifest.json").read_text(encoding="utf-8"))
+            expected = manifest["expected_outputs"]
+            for category, files in expected.items():
+                for fname in files[1:]:
+                    (product_dir / category / fname).write_bytes(b"")
+
+            bad_path = product_dir / "showcase" / expected["showcase"][0]
+            bad_path.mkdir()
+
+            with self.assertRaises(ValidationError):
+                validate_product_package(product_dir, require_images=True)
+
+    def test_validator_rejects_missing_manifest_layout_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            product = ProductRow(
+                product_id="SKU123",
+                product_name_en="Stainless Steel Insulated Tumbler",
+                style_pack="minimal_white",
+                output_set="minimum",
+                units="cm",
+                dimensions_l=None,
+                dimensions_w=None,
+                dimensions_h=None,
+                specs=("Capacity: 500 ml", "Double-wall insulation", "Leak-proof lid"),
+                howto_title="How to Use",
+                steps=("Fill with your drink", "Close the lid firmly", "Enjoy hot or cold beverages"),
+                tips=(),
+                manager_notes=None,
+                must_have_keywords=None,
+                must_avoid_elements=None,
+                personalization_text_en=None,
+            )
+            product_dir = generate_product_package(product, root / "out", batch_id=None)
+            (product_dir / "source").rmdir()
+
+            with self.assertRaises(ValidationError):
+                validate_product_package(product_dir, require_images=False)
+
+    def test_validator_rejects_manifest_product_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            product = ProductRow(
+                product_id="SKU123",
+                product_name_en="Stainless Steel Insulated Tumbler",
+                style_pack="minimal_white",
+                output_set="minimum",
+                units="cm",
+                dimensions_l=None,
+                dimensions_w=None,
+                dimensions_h=None,
+                specs=("Capacity: 500 ml", "Double-wall insulation", "Leak-proof lid"),
+                howto_title="How to Use",
+                steps=("Fill with your drink", "Close the lid firmly", "Enjoy hot or cold beverages"),
+                tips=(),
+                manager_notes=None,
+                must_have_keywords=None,
+                must_avoid_elements=None,
+                personalization_text_en=None,
+            )
+            product_dir = generate_product_package(product, root / "out", batch_id=None)
+
+            import json
+
+            manifest_path = product_dir / "manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["product"]["safe_product_id"] = "OTHER123"
+            manifest_path.write_text(
+                json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaises(ValidationError):
+                validate_product_package(product_dir, require_images=False)
+
+    def test_validator_rejects_wrong_expected_output_count_and_duplicates(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            product = ProductRow(
+                product_id="SKU123",
+                product_name_en="Stainless Steel Insulated Tumbler",
+                style_pack="minimal_white",
+                output_set="minimum",
+                units="cm",
+                dimensions_l=None,
+                dimensions_w=None,
+                dimensions_h=None,
+                specs=("Capacity: 500 ml", "Double-wall insulation", "Leak-proof lid"),
+                howto_title="How to Use",
+                steps=("Fill with your drink", "Close the lid firmly", "Enjoy hot or cold beverages"),
+                tips=(),
+                manager_notes=None,
+                must_have_keywords=None,
+                must_avoid_elements=None,
+                personalization_text_en=None,
+            )
+            product_dir = generate_product_package(product, root / "out", batch_id=None)
+
+            import json
+
+            manifest_path = product_dir / "manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["expected_outputs"]["showcase"] = [manifest["expected_outputs"]["showcase"][0]]
+            manifest_path.write_text(
+                json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaises(ValidationError):
+                validate_product_package(product_dir, require_images=True)
+
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            duplicate_name = manifest["expected_outputs"]["spec"][0]
+            manifest["expected_outputs"]["spec"] = [duplicate_name, duplicate_name]
+            manifest_path.write_text(
+                json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaises(ValidationError):
+                validate_product_package(product_dir, require_images=True)
+
     def test_manifest_json_must_be_object(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
